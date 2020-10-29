@@ -1,68 +1,128 @@
-#include <string.h>
+//Test given to us from our professor
+#include <stdbool.h>
+#include <stdio.h>
+#include "assert.h"
+#include "a2methods.h"
+#include "a2plain.h"
+#include "a2blocked.h"
 
-#include <a2blocked.h>
-#include "uarray2.h"
 
-// define a private version of each function in A2Methods_T that we implement
+#define W 13
+#define H 15
+#define BS 4
 
-typedef A2Methods_Array2 A2; // private abbreviation
+static A2Methods_T methods;
+typedef A2Methods_Array2 A2;
 
-static A2 new(int width, int height, int size) {
-  return UArray2_new(width, height, size);
+static void check_and_increment(int i, int j, A2 a, void *elem, void *cl) {
+  (void)i;
+  (void)j;
+  (void)a;
+  int *p = elem;
+  int *counter = cl;
+  assert(*p == *counter);
+  *counter += 1;   // NOT *counter++!
 }
 
-static A2 new_with_blocksize(int width, int height, int size, int blocksize) {
-  (void) blocksize;
-   return UArray2_new(width, height, size);
+static void double_row_major_plus() {
+  // store increasing integers in row-major order
+  A2 array = methods->new_with_blocksize(W, H, sizeof(int), BS);
+  int counter = 1;
+  for (int j = 0; j < H; j++) { 
+    for (int i = 0; i < W; i++) { // column index varies most rapidly
+      int *p = methods->at(array, i, j);
+      *p = counter++;
+    }
+  }
+  counter = 1;
+  for (int j = 0; j < H; j++) {
+    for (int i = 0; i < W; i++) {
+      int *p = methods->at(array, i, j);
+      assert(*p == counter);
+      counter++;
+    }
+  }
+  if (methods->map_row_major) {
+    counter = 1;
+    methods->map_row_major(array, check_and_increment, &counter);
+
+  }
+  methods->free(&array);
 }
 
-//free blocked array
-static void a2free (A2 *array2p) {
-  UArray2_free((UArray2_T *)array2p);
+#if 0
+static void show(int i, int j, A2 a, void *elem, void *cl) {
+  (void)a; (void)cl;
+  printf("A[%02d][%02d] == %05u -- should be %05d\n", i, j, *(unsigned *)elem,
+         1000 * i + j);
+}
+#endif
+
+static inline void check(A2 a, int i, int j, unsigned n) {
+  unsigned *p = methods->at(a, i, j);
+  assert(*p == n);
 }
 
-//return meta data
-static int width    (A2 array2) { return UArray2_width    (array2); }
-static int height   (A2 array2) { return UArray2_height   (array2); }
-static int size     (A2 array2) { return UArray2_size     (array2); }
-
-//uarray2 does not use blocks
-static int blocksize(A2 array2) { 
-  (void) array2;
-  return 1;
-   }
-
-static A2Methods_Object *at(A2 array2, int i, int j) {
-  return UArray2_at(array2, i, j);
+bool has_minimum_methods(A2Methods_T m) {
+  return m->new != NULL && m->new_with_blocksize != NULL
+    && m->free != NULL && m->width != NULL && m->height != NULL
+    && m->size != NULL && m->blocksize != NULL && m->at != NULL;
 }
 
-typedef void applyfun(int i, int j, UArray2_T array2, void *elem, void *cl);
-
-static void map_row_major (A2 array2, A2Methods_applyfun apply, void *cl) {
-  UArray2_map_row_major(array2, (applyfun*)apply, cl);
+bool has_plain_methods(A2Methods_T m) {
+  return m->map_default != NULL
+    && m->map_row_major != NULL
+    && m->map_col_major != NULL;
 }
 
-static void map_col_major (A2 array2, A2Methods_applyfun apply, void *cl) {
-  UArray2_map_col_major(array2, (applyfun*)apply, cl);
+bool has_blocked_methods(A2Methods_T m) {
+  return m->map_default != NULL && m->map_block_major != NULL;
 }
 
+static inline void copy_unsigned(A2Methods_T methods, A2 a, int i, int j, unsigned n) {
+  unsigned *p = methods->at(a, i, j);
+  *p = n;
+}
 
-static struct A2Methods_T array2_methods_plain_struct = {
-  new,
-  new_with_blocksize,
-  a2free,
-  width,
-  height,
-  size,
-  blocksize,
-  at,
-  map_row_major,
-  map_col_major,
-  NULL, //map_block_major,
-  map_row_major, // default
-  
-};
+static void test_methods(A2Methods_T methods_under_test) {
+  methods = methods_under_test;
+  assert(methods);
+  assert(has_minimum_methods(methods));
+  assert(!(has_plain_methods(methods) && has_blocked_methods(methods)));
+  if (!(has_plain_methods(methods) || has_blocked_methods(methods)))
+    fprintf(stderr, "Some full mapping methods are missing\n");
 
-// finally the payoff: here is the exported pointer to the struct
+  A2 array = methods->new_with_blocksize(W, H, sizeof(unsigned), BS);
+  copy_unsigned(methods, array,  2,  1, 99);
+  copy_unsigned(methods, array,  3,  3, 88);
+  copy_unsigned(methods, array, 10, 10, 77);
+  check(array,  2,  1, 99);
+  check(array,  3,  3, 88);
+  check(array, 10, 10, 77);
+  for (int i = 0; i < W; i++) {
+    for (int j = 0; j < H; j++) {
+      unsigned n = 1000 * i + j;
+      copy_unsigned(methods, array, i, j, n);
+      unsigned *p = methods->at(array, i, j);
+      assert(*p == n);
+    }
+  }
+  for (int i = 0; i < W; i++) {
+    for (int j = 0; j < H; j++) {
+      unsigned n = 1000 * i + j;
+      unsigned *p = methods->at(array, i, j);
+      assert(*p == n);
+    }
+  }
+  double_row_major_plus();
+  methods->free(&array);
+}
 
-A2Methods_T array2_methods_plain = &array2_methods_plain_struct;
+int main(int argc, char *argv[]) {
+  assert(argc == 1);
+  (void)argv;
+  test_methods(array2_methods_plain);
+  test_methods(array2_methods_blocked); //may have to uncomment later
+  printf("Passed.\n");  // only if we reach this point without assertion failure
+  return 0;
+}
