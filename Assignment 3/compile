@@ -1,128 +1,58 @@
-//Test given to us from our professor
-#include <stdbool.h>
-#include <stdio.h>
-#include "assert.h"
-#include "a2methods.h"
-#include "a2plain.h"
-#include "a2blocked.h"
+#!/bin/sh
 
+set -e    # halt on first error
 
-#define W 13
-#define H 15
-#define BS 4
+link=all  # link all binaries by default
+linked=no # track whether we linked
 
-static A2Methods_T methods;
-typedef A2Methods_Array2 A2;
+case $1 in  
+  -nolink) link=none ; shift ;;  # don't link
+  -link)   link="$2" ; shift ; shift ;;  # link only one binary
+esac
 
-static void check_and_increment(int i, int j, A2 a, void *elem, void *cl) {
-  (void)i;
-  (void)j;
-  (void)a;
-  int *p = elem;
-  int *counter = cl;
-  assert(*p == *counter);
-  *counter += 1;   // NOT *counter++!
-}
+CC=gcc
 
-static void double_row_major_plus() {
-  // store increasing integers in row-major order
-  A2 array = methods->new_with_blocksize(W, H, sizeof(int), BS);
-  int counter = 1;
-  for (int j = 0; j < H; j++) { 
-    for (int i = 0; i < W; i++) { // column index varies most rapidly
-      int *p = methods->at(array, i, j);
-      *p = counter++;
-    }
-  }
-  counter = 1;
-  for (int j = 0; j < H; j++) {
-    for (int i = 0; i < W; i++) {
-      int *p = methods->at(array, i, j);
-      assert(*p == counter);
-      counter++;
-    }
-  }
-  if (methods->map_row_major) {
-    counter = 1;
-    methods->map_row_major(array, check_and_increment, &counter);
+# compile and link against course software and netpbm library
+CFLAGS="-I. -I/usr/local/cii/include -I/usr/local/include -I/csc/411/include"
+LIBS="-llocality -lcii -lnetpbm -lm"
+LFLAGS="-L/usr/local/cii/lib -L/usr/local/lib -L/csc/411/lib"
 
-  }
-  methods->free(&array);
-}
+# these flags max out warnings and debug info
+FLAGS="-no-pie -g -O0 -Wall -Wextra -Werror -Wfatal-errors -std=c99 -pedantic"
 
-#if 0
-static void show(int i, int j, A2 a, void *elem, void *cl) {
-  (void)a; (void)cl;
-  printf("A[%02d][%02d] == %05u -- should be %05d\n", i, j, *(unsigned *)elem,
-         1000 * i + j);
-}
-#endif
+rm -f *.o  # make sure no object files are left hanging around
 
-static inline void check(A2 a, int i, int j, unsigned n) {
-  unsigned *p = methods->at(a, i, j);
-  assert(*p == n);
-}
+case $# in
+  0) set *.c ;; # if no args are given, compile all .c files
+esac
 
-bool has_minimum_methods(A2Methods_T m) {
-  return m->new != NULL && m->new_with_blocksize != NULL
-    && m->free != NULL && m->width != NULL && m->height != NULL
-    && m->size != NULL && m->blocksize != NULL && m->at != NULL;
-}
+# compile each argument to a .o file
+for cfile 
+do
+  gcc $FLAGS $CFLAGS -c $cfile
+done
 
-bool has_plain_methods(A2Methods_T m) {
-  return m->map_default != NULL
-    && m->map_row_major != NULL
-    && m->map_col_major != NULL;
-}
+########### the middle part is different for each assignment
+# link together .o files + libraries to make executable binaries
+# using one case statement per executable binary
+case $link in
+  all|a2test) gcc $FLAGS $LFLAGS -o a2test a2test.o \
+                  uarray2b.o a2plain.o a2blocked.o uarray2.o\
+                  $LIBS 
+              linked=yes ;;
+esac
 
-bool has_blocked_methods(A2Methods_T m) {
-  return m->map_default != NULL && m->map_block_major != NULL;
-}
+case $link in
+  all|ppmtrans) gcc $FLAGS $LFLAGS -o ppmtrans ppmtrans.o  \
+                  uarray2b.o a2plain.o  a2blocked.o uarray2.o\
+                  $LIBS 
+                  linked=yes ;;
+esac
 
-static inline void copy_unsigned(A2Methods_T methods, A2 a, int i, int j, unsigned n) {
-  unsigned *p = methods->at(a, i, j);
-  *p = n;
-}
-
-static void test_methods(A2Methods_T methods_under_test) {
-  methods = methods_under_test;
-  assert(methods);
-  assert(has_minimum_methods(methods));
-  assert(!(has_plain_methods(methods) && has_blocked_methods(methods)));
-  if (!(has_plain_methods(methods) || has_blocked_methods(methods)))
-    fprintf(stderr, "Some full mapping methods are missing\n");
-
-  A2 array = methods->new_with_blocksize(W, H, sizeof(unsigned), BS);
-  copy_unsigned(methods, array,  2,  1, 99);
-  copy_unsigned(methods, array,  3,  3, 88);
-  copy_unsigned(methods, array, 10, 10, 77);
-  check(array,  2,  1, 99);
-  check(array,  3,  3, 88);
-  check(array, 10, 10, 77);
-  for (int i = 0; i < W; i++) {
-    for (int j = 0; j < H; j++) {
-      unsigned n = 1000 * i + j;
-      copy_unsigned(methods, array, i, j, n);
-      unsigned *p = methods->at(array, i, j);
-      assert(*p == n);
-    }
-  }
-  for (int i = 0; i < W; i++) {
-    for (int j = 0; j < H; j++) {
-      unsigned n = 1000 * i + j;
-      unsigned *p = methods->at(array, i, j);
-      assert(*p == n);
-    }
-  }
-  double_row_major_plus();
-  methods->free(&array);
-}
-
-int main(int argc, char *argv[]) {
-  assert(argc == 1);
-  (void)argv;
-  test_methods(array2_methods_plain);
-  test_methods(array2_methods_blocked); //may have to uncomment later
-  printf("Passed.\n");  // only if we reach this point without assertion failure
-  return 0;
-}
+# error if asked to link something we didn't recognize
+if [ $linked = no ]; then
+  case $link in  # if the -link option makes no sense, complain 
+    none) ;; # OK, do nothing
+    *) echo "`basename $0`: don't know how to link $link" 1>&2 ; exit 1 ;;
+  esac
+fi
